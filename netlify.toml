@@ -2,8 +2,15 @@
   command = "pip install -r requirements.txt"
   functions = "netlify/functions"
 
+# 讓所有 /yql 開頭的請求，不論後面帶什麼參數，都強制轉發給 weather 函數
 [[redirects]]
   from = "/yql"
+  to = "/.netlify/functions/weather"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/yql/*"
   to = "/.netlify/functions/weather"
   status = 200
   force = true
