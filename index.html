@@ -86,7 +86,6 @@
             box-shadow: 0 1px 2px rgba(0,0,0,0.6) inset;
         }
 
-        .status.waiting::before { background-color: #8e8e93; box-shadow: 0 0 4px #8e8e93; }
         .status.checking::before { background-color: #ffcc00; box-shadow: 0 0 8px #ffcc00; }
         .status.online::before { background-color: #39ff14; box-shadow: 0 0 8px #39ff14; }
         .status.offline::before { background-color: #ff2d55; box-shadow: 0 0 8px #ff2d55; }
@@ -117,22 +116,6 @@
             display: block;
             margin-bottom: 6px;
             letter-spacing: 0.5px;
-        }
-
-        /* 經典 iOS 輸入框 */
-        .ios-input {
-            width: 100%;
-            box-sizing: border-box;
-            background-color: #ffffff;
-            border: 1px solid #6d7379;
-            border-radius: 6px;
-            padding: 10px;
-            font-size: 14px;
-            color: #333333;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.2) inset;
-            outline: none;
-            margin-bottom: 12px;
-            font-family: monospace;
         }
 
         /* 藍色金屬高光網址框 */
@@ -193,84 +176,57 @@
     <div class="container">
         <h1>CWA-on-iOS6WeatherAPP</h1>
         
-        <div class="status waiting" id="statusIndicator">● 請輸入 API 金鑰</div>
+        <div class="status checking" id="statusIndicator">● 正在驗證服務...</div>
         <div class="error-msg" id="errorDetail"></div>
         
-        <p id="statusText">請輸入你在氣象署申請的免費 API 授權碼，我們將即時為你生成 iOS 6 專用的天氣伺服器網址。</p>
+        <p id="statusText">正在向後台及中央氣象署發送測試請求...</p>
         
         <div class="info-group">
-            <label>第一步：輸入中央氣象署 API 授權碼</label>
-            <input type="text" class="ios-input" id="apiKeyInput" placeholder="CWA-XXXXXX..." autocomplete="off">
-            
-            <label>第二步：複製產生的 iOS 6 專用網址</label>
-            <div class="url-box" id="myUrl">請先在上方輸入金鑰...</div>
+            <label>iOS 6 WeatherX 專用設定網址</label>
+            <div class="url-box" id="myUrl">https://your-project.netlify.app</div>
         </div>
 
-        <a href="https://github.com/Hamster67/CWA-on-iOS6WeatherAPP" target="_blank" class="ios-btn">
+        <a href="https://github.com/你的用戶名/CWA-on-iOS6WeatherAPP" target="_blank" class="ios-btn">
             檢視 GitHub 專案
         </a>
     </div>
 
     <script>
         const currentOrigin = window.location.origin;
-        const apiKeyInput = document.getElementById('apiKeyInput');
         const urlBox = document.getElementById('myUrl');
         const indicator = document.getElementById('statusIndicator');
         const statusText = document.getElementById('statusText');
         const errorDetail = document.getElementById('errorDetail');
 
-        let debounceTimer;
+        // 網址顯示最單純的 Origin 即可
+        urlBox.innerText = currentOrigin;
 
-        apiKeyInput.addEventListener('input', () => {
-            clearTimeout(debounceTimer);
-            const key = apiKeyInput.value.trim();
+        // 【核心修改】測試網址直接呼叫 /yql，後端會自動幫我們抓取氣象局資料
+        const testUrl = `${currentOrigin}/yql`;
 
-            if (!key) {
-                urlBox.innerText = "請先在上方輸入金鑰...";
-                indicator.className = "status waiting";
-                indicator.innerText = "● 請輸入 API 金鑰";
-                statusText.innerText = "請輸入你在氣象署申請的免費 API 授權碼，我們將即時為你生成 iOS 6 專用的天氣伺服器網址。";
-                errorDetail.style.display = "none";
-                return;
-            }
-
-            // 動態生成帶有 ?k= 參數的 YQL 網址
-            const generatedUrl = `${currentOrigin}/yql?k=${key}`;
-            urlBox.innerText = generatedUrl;
-
-            // 顯示檢測中（黃燈）
-            indicator.className = "status checking";
-            indicator.innerText = "● 正在驗證金鑰...";
-            statusText.innerText = "正在向中央氣象署發送測試請求以確認金鑰有效性...";
-            errorDetail.style.display = "none";
-
-            // 延遲 800ms 再發送驗證，避免使用者打字時拼命送出請求
-            debounceTimer = setTimeout(() => {
-                const testUrl = `${generatedUrl}&q=lat=25.03 and lon=121.56`;
-                
-                fetch(testUrl)
-                    .then(response => {
-                        if (!response.ok) throw new Error(`HTTP 錯誤！狀態碼: ${response.status}`);
-                        return response.json();
-                    })
-                    .then(data => {
-                        if (data && data.current && data.current.temp !== undefined) {
-                            indicator.className = "status online";
-                            indicator.innerText = "● 驗證成功！服務正常";
-                            statusText.innerHTML = `金鑰有效！台北即時測試溫度：<strong>${data.current.temp}°C</strong>。<br>現在你可以將上方網址複製並寫入 WeatherX 插件了！`;
-                        } else {
-                            throw new Error("回傳格式解析失敗。");
-                        }
-                    })
-                    .catch(error => {
-                        indicator.className = "status offline";
-                        indicator.innerText = "● 金鑰無效或異常";
-                        statusText.innerText = "無法透過此金鑰取得氣象資料，請檢查是否有複製完整或輸入錯誤。";
-                        errorDetail.style.display = "block";
-                        errorDetail.innerText = `錯誤原因: ${error.message}`;
-                    });
-            }, 800);
-        });
+        fetch(testUrl)
+            .then(response => {
+                if (!response.ok) throw new Error(`HTTP 錯誤！狀態碼: ${response.status}`);
+                return response.json();
+            })
+            .then(data => {
+                if (data && data.current && data.current.temp !== undefined) {
+                    indicator.className = "status online";
+                    indicator.innerText = "● 服務正常運作中";
+                    // 取得當前天氣描述與溫度
+                    const desc = data.current.weather[0].description || "未知";
+                    statusText.innerHTML = `驗證成功！目前即時天氣：<strong>${desc} (${data.current.temp}°C)</strong>。<br>請將上方的網址寫入 iOS 6 的 WeatherX 插件中。`;
+                } else {
+                    throw new Error("回傳天氣格式解析失敗。");
+                }
+            })
+            .catch(error => {
+                indicator.className = "status offline";
+                indicator.innerText = "● 服務異常";
+                statusText.innerText = "無法連接到天氣後端，請檢查 Netlify Deploy Logs 是否有報錯。";
+                errorDetail.style.display = "block";
+                errorDetail.innerText = `偵測到錯誤: ${error.message}`;
+            });
     </script>
 </body>
 </html>

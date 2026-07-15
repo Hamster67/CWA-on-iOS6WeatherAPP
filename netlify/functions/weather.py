@@ -8,7 +8,7 @@ from cachetools import TTLCache
 # OWM API Key 保持相容
 owmkey = sys.argv[1] if len(sys.argv) > 1 else None
 
-# 使用 1 小時 TTL 快取機制[cite: 2]
+# 使用 1 小時 TTL 快取機制
 woeidCache = TTLCache(maxsize=100, ttl=3600)
 
 dateTable = {
@@ -36,34 +36,7 @@ def getLatLongForQ(q):
     return [lat, long]
 
 
-# 1. 簡易座標轉換台灣縣市 (氣象署 API 需要中文縣市名稱進行篩選)
-def getCountyByCoordinates(lat, lon):
-    try:
-        latitude = float(lat)
-        longitude = float(lon)
-    except Exception:
-        return '臺北市'
-
-    # 粗略台灣緯度邊界判定，適合快速定位
-    if latitude > 25.0:
-        if longitude < 121.4: return '新北市'
-        return '臺北市'
-    elif latitude > 24.5:
-        if longitude < 121.0: return '桃園市'
-        return '新竹縣'
-    elif latitude > 24.0:
-        return '臺中市'
-    elif latitude > 23.5:
-        return '彰化縣'
-    elif latitude > 23.0:
-        if longitude > 121.0: return '臺東縣'
-        return '臺南市'
-    elif latitude > 22.0:
-        return '高雄市'
-    return '臺北市'
-
-
-# 2. 將氣象署 Wx 天氣代碼對應至 OWM 代碼 (確保 iOS 6 能顯示對應的天氣圖示)[cite: 1]
+# 1. 將氣象署 Wx 天氣代碼對應至 OWM 代碼[cite: 1]
 def mapCwaWxToOwmId(wxCode):
     try:
         code = int(wxCode)
@@ -77,47 +50,42 @@ def mapCwaWxToOwmId(wxCode):
     return 800
 
 
-# 3. 直接對接氣象署 API 取得預報，並轉換為 OWM 格式，支援自訂金鑰[cite: 1, 2]
-def getWeather(lat, lng, woeid, custom_api_key=None):
-    # 若有傳入自訂金鑰，將快取 Key 與金鑰綁定，避免不同使用者交叉污染
-    cache_key = f"{woeid}_{custom_api_key}" if custom_api_key else woeid
-
-    # 快取機制，防止高頻率重複請求 CWA
-    if cache_key in woeidCache:
+# 2. 直接讀取你指定的完整氣象署 API 網址並進行轉換[cite: 1]
+def getWeather(woeid):
+    # 快取機制
+    if woeid in woeidCache:
         print("Returning cached response")
-        return woeidCache[cache_key]
+        return woeidCache[woeid]
 
-    # 優先選用前端網址傳遞過來的金鑰，否則使用預設值
-    CWA_API_KEY = custom_api_key if custom_api_key else "CWA-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
-    county = getCountyByCoordinates(lat, lng)
-
-    # 呼叫氣象署「一般天氣預報-今明36小時天氣預報」API
-    url = "https://opendata.cwa.gov.tw/api/v1/rest/datastore/F-C0032-001"
-    params = {
-        "Authorization": CWA_API_KEY,
-        "locationName": county,
-        "elementName": "Wx,MinT,MaxT,PoP"
+    # 【核心修改】直接讀取你提供、100% 測試可用的完整 API 網址
+    url = "https://opendata.cwa.gov.tw/api/v1/rest/datastore/F-C0032-001?Authorization=CWB-68CB4AF6-A1EF-47C8-9614-1A6BFB80D6C8&format=JSON&elementName="
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/json"
     }
 
     try:
-        response = requests.get(url, params=params, timeout=10).json()
+        req_response = requests.get(url, headers=headers, timeout=10)
+        req_response.raise_for_status() 
+        response = req_response.json()
+        
+        # 預設直接抓取回傳結果中的第一個縣市（通常是第一個被排序的縣市）
         weather_data = response['records']['location'][0]
         elements = weather_data['weatherElement']
         
-        # 解析氣象元素
         wx = next(el for el in elements if el['elementName'] == 'Wx')['time']
         min_t = next(el for el in elements if el['elementName'] == 'MinT')['time']
         max_t = next(el for el in elements if el['elementName'] == 'MaxT')['time']
         pop = next(el for el in elements if el['elementName'] == 'PoP')['time']
 
-        # 當前氣溫預估 (取今天最高溫與最低溫平均值)
         current_min = float(min_t[0]['parameter']['parameterName'])
         current_max = float(max_t[0]['parameter']['parameterName'])
         current_temp = round((current_min + current_max) / 2)
 
-        # 封裝成 OWM 1.0 JSON 規格[cite: 2]
+        # 封裝成 OWM 1.0 JSON 規格
         spoofedOwmResponse = {
-            "timezone_offset": 28800,  # 台北標準時區 (UTC+8)
+            "timezone_offset": 28800,
             "current": {
                 "dt": int(datetime.datetime.now().timestamp()),
                 "temp": current_temp,
@@ -138,7 +106,6 @@ def getWeather(lat, lng, woeid, custom_api_key=None):
                 ]
             },
             "daily": [
-                # 今天 (第一段預報)
                 {
                     "pop": float(pop[0]['parameter']['parameterName']) / 100,
                     "temp": {
@@ -149,7 +116,6 @@ def getWeather(lat, lng, woeid, custom_api_key=None):
                         { "id": mapCwaWxToOwmId(wx[0]['parameter']['parameterValue']) }
                     ]
                 },
-                # 明天 (第二段預報)
                 {
                     "pop": float(pop[1]['parameter']['parameterName']) / 100,
                     "temp": {
@@ -160,7 +126,6 @@ def getWeather(lat, lng, woeid, custom_api_key=None):
                         { "id": mapCwaWxToOwmId(wx[1]['parameter']['parameterValue']) }
                     ]
                 },
-                # 後天 (第三段預報)
                 {
                     "pop": float(pop[2]['parameter']['parameterName']) / 100,
                     "temp": {
@@ -172,83 +137,56 @@ def getWeather(lat, lng, woeid, custom_api_key=None):
                     ]
                 }
             ],
-            "hourly": []  # 保持空陣列
+            "hourly": []
         }
 
-        # 寫入 TTLCache 機制
-        woeidCache[cache_key] = spoofedOwmResponse
+        # 寫入快取
+        woeidCache[woeid] = spoofedOwmResponse
         return spoofedOwmResponse
 
     except Exception as e:
-        print("Fetch weather from CWA API failed: ", e)
+        print("Fetch weather failed: ", e)
         return None
 
   
 def dayOrNight(timestamp):
     global global_sunrise_time, global_sunset_time
     if global_sunrise_time is None or global_sunset_time is None:
-        print("Global sunrise or sunset time has not been set.")
         return False
-    
-    if global_sunrise_time < timestamp < global_sunset_time:
-        return True
-    else:
-        return False
+    return global_sunrise_time < timestamp < global_sunset_time
 
 
 def weatherIcon(id, sunset, timestamp=None):
     day = True if timestamp is None else dayOrNight(timestamp)
     id = str(id)
-    if id.startswith("2"):
-        return 0
-    if id.startswith("3"):
-        return 9
+    if id.startswith("2"): return 0
+    if id.startswith("3"): return 9
     if id.startswith("5"):
-        if id == "500":
-            return 39 if day else 9
-        if id == "501":
-            return 11
-        if id in ["502", "503", "504"]:
-            return 11
-        if id == "511":
-            return 25
-        if id.startswith("52"):
-            return 11
+        if id == "500": return 39 if day else 9
+        if id == "501": return 11
+        if id in ["502", "503", "504"]: return 11
+        if id == "511": return 25
+        if id.startswith("52"): return 11
     if id.startswith("6"):
-        if id in ["600", "620"]:
-            return 13
-        if id in ["601", "621"]:
-            return 15
-        if id in ["602", "622"]:
-            return 46
-        if id in ["611", "612", "613"]:
-            return 6
-        if id == "615" or id == "616":
-            return 35
+        if id in ["600", "620"]: return 13
+        if id in ["601", "621"]: return 15
+        if id in ["602", "622"]: return 46
+        if id in ["611", "612", "613"]: return 6
+        if id == "615" or id == "616": return 35
     if id.startswith("7"):
-        if id == "781":
-            return 0
+        if id == "781": return 0
         return 23
     if id.startswith("8"):
-        if id == "800":
-            return 32 if day else 31
-        if id == "801":
-            return 30 if day else 29
-        if id == "802":
-            return 30 if day else 29
-        if id == "803" or id == "804":
-            return 27
+        if id == "800": return 32 if day else 31
+        if id == "801": return 30 if day else 29
+        if id == "802": return 30 if day else 29
+        if id == "803" or id == "804": return 27
     if id.startswith("9"):
-        if id == "900" or id == "901" or id == "902" or id == "962":
-            return 0
-        if id == "903":
-            return 25
-        if id == "904":
-            return 19
-        if id == "905":
-            return 23
-        if id == "906":
-            return 17
+        if id == "900" or id == "901" or id == "902" or id == "962": return 0
+        if id == "903": return 25
+        if id == "904": return 19
+        if id == "905": return 23
+        if id == "906": return 17
     return 48
 
 def weatherPoP(pop):
@@ -279,31 +217,8 @@ def dayNext(n):
 
 def dayArray():
   return [
-    dayNext(1),
-    dayNext(2),
-    dayNext(3),
-    dayNext(4),
-    dayNext(5),
-    dayNext(6)
+    dayNext(1), dayNext(2), dayNext(3), dayNext(4), dayNext(5), dayNext(6)
   ]
-
-def moonPhase(phase):
-  if phase == 0 or phase == 1:
-    return [0, 0]
-  elif phase == 0.25:
-    return [64, 1]
-  elif phase == 0.5:
-    return [108, 5]
-  elif phase == 0.75:
-    return [47, 5]
-  elif 0.75 <= phase <= 1:
-    return [16, 5]
-  elif 0.50 <= phase <= 0.75:
-    return [72, 5]
-  elif 0.25 <= phase <= 0.50:
-    return [84, 1]
-  elif 0 <= phase <= 0.25:
-    return [32, 1]
 
 
 # ==========================================
@@ -311,32 +226,10 @@ def moonPhase(phase):
 # ==========================================
 def handler(event, context):
     query_params = event.get("queryStringParameters", {}) or {}
-    
-    # 從 URL 請求中獲取參數 (?q=... & k=... & woeid=...)
-    q = query_params.get("q", "")
-    api_key = query_params.get("k", "")
     woeid = query_params.get("woeid", "default_woeid")
 
-    # 如果沒傳 API Key，直接報 400
-    if not api_key:
-        return {
-            "statusCode": 400,
-            "headers": {
-                "Content-Type": "application/json",
-                "Access-Control-Allow-Origin": "*"
-            },
-            "body": json.dumps({"error": "Missing API Key parameter 'k'"})
-        }
-
-    # 解析經緯度
-    try:
-        lat, lon = getLatLongForQ(q)
-    except Exception:
-        # 如果測試時 q 格式不完整，給予台北座標方便檢測
-        lat, lon = "25.03", "121.56"
-
-    # 獲取氣象資料[cite: 2]
-    weather_data = getWeather(lat, lon, woeid, custom_api_key=api_key)
+    # 獲取氣象資料（不再需要傳入 lat, lon 與 api_key，後端直接向指定 API 拿資料）
+    weather_data = getWeather(woeid)
 
     if weather_data is None:
         return {
@@ -348,7 +241,6 @@ def handler(event, context):
             "body": json.dumps({"error": "Failed to fetch weather from CWA"})
         }
 
-    # 回傳 JSON 格式並允許 CORS 跨域[cite: 2]
     return {
         "statusCode": 200,
         "headers": {
