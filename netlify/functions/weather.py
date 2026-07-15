@@ -2,6 +2,7 @@ import sys
 import requests
 import datetime
 import time
+import json
 from cachetools import TTLCache
 
 # OWM API Key 保持相容
@@ -35,7 +36,7 @@ def getLatLongForQ(q):
     return [lat, long]
 
 
-# 1. 簡易座標轉換台灣縣市
+# 1. 簡易座標轉換台灣縣市 (氣象署 API 需要中文縣市名稱進行篩選)
 def getCountyByCoordinates(lat, lon):
     try:
         latitude = float(lat)
@@ -43,6 +44,7 @@ def getCountyByCoordinates(lat, lon):
     except Exception:
         return '臺北市'
 
+    # 粗略台灣緯度邊界判定，適合快速定位
     if latitude > 25.0:
         if longitude < 121.4: return '新北市'
         return '臺北市'
@@ -61,7 +63,7 @@ def getCountyByCoordinates(lat, lon):
     return '臺北市'
 
 
-# 2. 將氣象署 Wx 天氣代碼對應至 OWM 代碼[cite: 1]
+# 2. 將氣象署 Wx 天氣代碼對應至 OWM 代碼 (確保 iOS 6 能顯示對應的天氣圖示)[cite: 1]
 def mapCwaWxToOwmId(wxCode):
     try:
         code = int(wxCode)
@@ -77,16 +79,15 @@ def mapCwaWxToOwmId(wxCode):
 
 # 3. 直接對接氣象署 API 取得預報，並轉換為 OWM 格式，支援自訂金鑰[cite: 1, 2]
 def getWeather(lat, lng, woeid, custom_api_key=None):
-    # 【修改重點 1】若有傳入自訂金鑰，將快取 Key 與金鑰綁定（例如: "123456_CWA-XXX..."）
-    # 避免不同使用者在相同地區（同 woeid）時，因為快取導致拿到別人的請求結果或權限出錯。
+    # 若有傳入自訂金鑰，將快取 Key 與金鑰綁定，避免不同使用者交叉污染
     cache_key = f"{woeid}_{custom_api_key}" if custom_api_key else woeid
 
-    # 快取機制
+    # 快取機制，防止高頻率重複請求 CWA
     if cache_key in woeidCache:
         print("Returning cached response")
         return woeidCache[cache_key]
 
-    # 【修改重點 2】優先選用網址傳遞過來的自訂 API 授權碼，沒有的話才 fallback 到預設值
+    # 優先選用前端網址傳遞過來的金鑰，否則使用預設值
     CWA_API_KEY = custom_api_key if custom_api_key else "CWA-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
     county = getCountyByCoordinates(lat, lng)
 
@@ -174,7 +175,7 @@ def getWeather(lat, lng, woeid, custom_api_key=None):
             "hourly": []  # 保持空陣列
         }
 
-        # 寫入 TTLCache 機制，使用綁定金鑰的 cache_key
+        # 寫入 TTLCache 機制
         woeidCache[cache_key] = spoofedOwmResponse
         return spoofedOwmResponse
 
@@ -303,3 +304,56 @@ def moonPhase(phase):
     return [84, 1]
   elif 0 <= phase <= 0.25:
     return [32, 1]
+
+
+# ==========================================
+# Netlify Functions 專用進入點 (Handler)
+# ==========================================
+def handler(event, context):
+    query_params = event.get("queryStringParameters", {}) or {}
+    
+    # 從 URL 請求中獲取參數 (?q=... & k=... & woeid=...)
+    q = query_params.get("q", "")
+    api_key = query_params.get("k", "")
+    woeid = query_params.get("woeid", "default_woeid")
+
+    # 如果沒傳 API Key，直接報 400
+    if not api_key:
+        return {
+            "statusCode": 400,
+            "headers": {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*"
+            },
+            "body": json.dumps({"error": "Missing API Key parameter 'k'"})
+        }
+
+    # 解析經緯度
+    try:
+        lat, lon = getLatLongForQ(q)
+    except Exception:
+        # 如果測試時 q 格式不完整，給予台北座標方便檢測
+        lat, lon = "25.03", "121.56"
+
+    # 獲取氣象資料[cite: 2]
+    weather_data = getWeather(lat, lon, woeid, custom_api_key=api_key)
+
+    if weather_data is None:
+        return {
+            "statusCode": 500,
+            "headers": {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*"
+            },
+            "body": json.dumps({"error": "Failed to fetch weather from CWA"})
+        }
+
+    # 回傳 JSON 格式並允許 CORS 跨域[cite: 2]
+    return {
+        "statusCode": 200,
+        "headers": {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*"
+        },
+        "body": json.dumps(weather_data)
+    }
