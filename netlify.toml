@@ -3,6 +3,7 @@
   functions = "netlify/functions"
 
 [[redirects]]
-  from = "/yql/*"
+  from = "/yql"
   to = "/.netlify/functions/weather"
   status = 200
+  force = true
