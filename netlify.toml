@@ -1,16 +1,18 @@
 [build]
-  command = "pip install -r requirements.txt"
-  functions = "netlify/functions"
+  # 設定前端 HTML/JS 所在的目錄。如果你的 index.html 就在根目錄，請填 "."
+  # 如果你有放在 public 夾，請改為 "public"
+  publish = "."
 
-# 讓所有 /yql 開頭的請求，不論後面帶什麼參數，都強制轉發給 weather 函數
+[functions]
+  # 告訴 Netlify，Python Serverless Functions 放在哪裡
+  directory = "netlify/functions"
+  
+  # 指定 Python 執行階段版本（建議使用較新且穩定的 3.8 或 3.9 以上）
+  node_bundler = "esbuild"
+
 [[redirects]]
+  # 當 iOS 6 或前端網頁發送 /yql 請求時，自動導向至後端 Python 函數
   from = "/yql"
-  to = "/.netlify/functions/weather"
-  status = 200
-  force = true
-
-[[redirects]]
-  from = "/yql/*"
-  to = "/.netlify/functions/weather"
+  to = "/.netlify/functions/yql"
   status = 200
   force = true
