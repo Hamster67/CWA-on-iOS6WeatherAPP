@@ -4,10 +4,10 @@ import datetime
 import time
 from cachetools import TTLCache
 
-# 如果你不需要 OWM API Key 了，可以自行決定是否保留
+# OWM API Key 保持相容
 owmkey = sys.argv[1] if len(sys.argv) > 1 else None
 
-# 使用你原本設定的 1 小時 TTL 快取機制
+# 使用 1 小時 TTL 快取機制[cite: 2]
 woeidCache = TTLCache(maxsize=100, ttl=3600)
 
 dateTable = {
@@ -35,7 +35,7 @@ def getLatLongForQ(q):
     return [lat, long]
 
 
-# 1. 簡易座標轉換台灣縣市 (氣象署 API 需要中文縣市名稱進行篩選)
+# 1. 簡易座標轉換台灣縣市
 def getCountyByCoordinates(lat, lon):
     try:
         latitude = float(lat)
@@ -43,7 +43,6 @@ def getCountyByCoordinates(lat, lon):
     except Exception:
         return '臺北市'
 
-    # 粗略台灣緯度邊界判定，適合快速定位
     if latitude > 25.0:
         if longitude < 121.4: return '新北市'
         return '臺北市'
@@ -62,7 +61,7 @@ def getCountyByCoordinates(lat, lon):
     return '臺北市'
 
 
-# 2. 將氣象署 Wx 天氣代碼對應至 OWM 代碼 (確保 iOS 6 能顯示對應的天氣圖示)[cite: 1]
+# 2. 將氣象署 Wx 天氣代碼對應至 OWM 代碼[cite: 1]
 def mapCwaWxToOwmId(wxCode):
     try:
         code = int(wxCode)
@@ -76,15 +75,19 @@ def mapCwaWxToOwmId(wxCode):
     return 800
 
 
-# 3. 直接對接氣象署 API 取得預報，並轉換為 OWM 格式[cite: 1, 2]
-def getWeather(lat, lng, woeid):
-    # 快取機制，防止高頻率重複請求 CWA
-    if woeid in woeidCache:
-        print("Returning cached response")
-        return woeidCache[woeid]
+# 3. 直接對接氣象署 API 取得預報，並轉換為 OWM 格式，支援自訂金鑰[cite: 1, 2]
+def getWeather(lat, lng, woeid, custom_api_key=None):
+    # 【修改重點 1】若有傳入自訂金鑰，將快取 Key 與金鑰綁定（例如: "123456_CWA-XXX..."）
+    # 避免不同使用者在相同地區（同 woeid）時，因為快取導致拿到別人的請求結果或權限出錯。
+    cache_key = f"{woeid}_{custom_api_key}" if custom_api_key else woeid
 
-    # TODO: 請在此處填入你在「中央氣象署開放資料平台」免費申請的 API 授權碼
-    CWA_API_KEY = "CWA-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+    # 快取機制
+    if cache_key in woeidCache:
+        print("Returning cached response")
+        return woeidCache[cache_key]
+
+    # 【修改重點 2】優先選用網址傳遞過來的自訂 API 授權碼，沒有的話才 fallback 到預設值
+    CWA_API_KEY = custom_api_key if custom_api_key else "CWA-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
     county = getCountyByCoordinates(lat, lng)
 
     # 呼叫氣象署「一般天氣預報-今明36小時天氣預報」API
@@ -111,7 +114,7 @@ def getWeather(lat, lng, woeid):
         current_max = float(max_t[0]['parameter']['parameterName'])
         current_temp = round((current_min + current_max) / 2)
 
-        # 封裝成 OWM 1.0 JSON 規格，以利 XMLGenerator 讀取[cite: 2]
+        # 封裝成 OWM 1.0 JSON 規格[cite: 2]
         spoofedOwmResponse = {
             "timezone_offset": 28800,  # 台北標準時區 (UTC+8)
             "current": {
@@ -168,11 +171,11 @@ def getWeather(lat, lng, woeid):
                     ]
                 }
             ],
-            "hourly": []  # 保持空陣列，iOS 6 在沒有每小時數據時依然能正常顯示大圖與日預報
+            "hourly": []  # 保持空陣列
         }
 
-        # 寫入 TTLCache 機制
-        woeidCache[woeid] = spoofedOwmResponse
+        # 寫入 TTLCache 機制，使用綁定金鑰的 cache_key
+        woeidCache[cache_key] = spoofedOwmResponse
         return spoofedOwmResponse
 
     except Exception as e:
@@ -182,78 +185,70 @@ def getWeather(lat, lng, woeid):
   
 def dayOrNight(timestamp):
     global global_sunrise_time, global_sunset_time
-
-    # Check if the global sunrise and sunset times have been set
     if global_sunrise_time is None or global_sunset_time is None:
         print("Global sunrise or sunset time has not been set.")
-        return False  # Or handle the error as you see fit
+        return False
     
-    print("Forecast time (epoch):", timestamp)
-    print("Sunrise time (epoch):", global_sunrise_time)
-    print("Sunset time (epoch):", global_sunset_time)
-
     if global_sunrise_time < timestamp < global_sunset_time:
-        print("DAYTIME for the forecast")
         return True
     else:
-        print("NIGHTTIME for the forecast")
         return False
 
 
-def weatherIcon(id, sunset, timestamp=None):  # timestamp is optional now
+def weatherIcon(id, sunset, timestamp=None):
     day = True if timestamp is None else dayOrNight(timestamp)
     id = str(id)
-    if id.startswith("2"):  # Thunderstorm
-        return 0  # Lightning
-    if id.startswith("3"):  # Drizzle
+    if id.startswith("2"):
+        return 0
+    if id.startswith("3"):
         return 9
-    if id.startswith("5"):  # Rain
-        if id == "500":  # Light rain
+    if id.startswith("5"):
+        if id == "500":
             return 39 if day else 9
-        if id == "501":  # Moderate rain
+        if id == "501":
             return 11
-        if id in ["502", "503", "504"]:  # Heavy intensity rain
+        if id in ["502", "503", "504"]:
             return 11
-        if id == "511":  # Freezing rain
+        if id == "511":
             return 25
-        if id.startswith("52"):  # Shower rain
+        if id.startswith("52"):
             return 11
-    if id.startswith("6"):  # Snow
-        if id in ["600", "620"]:  # Light snow
+    if id.startswith("6"):
+        if id in ["600", "620"]:
             return 13
-        if id in ["601", "621"]:  # Snow
+        if id in ["601", "621"]:
             return 15
-        if id in ["602", "622"]:  # Heavy snow
+        if id in ["602", "622"]:
             return 46
-        if id in ["611", "612", "613"]:  # Sleet
+        if id in ["611", "612", "613"]:
             return 6
-        if id == "615" or id == "616":  # Rain and snow
+        if id == "615" or id == "616":
             return 35
-    if id.startswith("7"):  # Atmosphere (Mist, Smoke, Haze, etc.)
-        if id == "781":  # Tornado
-            return 0  # No specific icon for tornado, using lightning
-        return 23  # Use the same icon for all misty conditions
-    if id.startswith("8"):  # Clear and clouds
-        if id == "800":  # Clear sky
-            return 32 if day else 31
-        if id == "801":  # Few clouds
-            return 30 if day else 29
-        if id == "802":  # Scattered clouds
-            return 30 if day else 29
-        if id == "803" or id == "804":  # Broken clouds, overcast clouds
-            return 27
-    if id.startswith("9"):  # Extreme
-        if id == "900" or id == "901" or id == "902" or id == "962":  # Tornado + hurricanes
+    if id.startswith("7"):
+        if id == "781":
             return 0
-        if id == "903":  # Cold
+        return 23
+    if id.startswith("8"):
+        if id == "800":
+            return 32 if day else 31
+        if id == "801":
+            return 30 if day else 29
+        if id == "802":
+            return 30 if day else 29
+        if id == "803" or id == "804":
+            return 27
+    if id.startswith("9"):
+        if id == "900" or id == "901" or id == "902" or id == "962":
+            return 0
+        if id == "903":
             return 25
-        if id == "904":  # Hot
+        if id == "904":
             return 19
-        if id == "905":  # Windy
+        if id == "905":
             return 23
-        if id == "906":  # Hail
+        if id == "906":
             return 17
-    return 48  # Default 'unknown' code
+    return 48
 
 def weatherPoP(pop):
   return int(float(pop)*100)

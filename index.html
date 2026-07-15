@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>iOS 6 台灣天氣中繼站</title>
+    <style>
+        /* iOS 6 經典亞麻布背景 */
+        body {
+            font-family: "Helvetica Neue", Helvetica, Arial, "Heiti TC", "Microsoft JhengHei", sans-serif;
+            background-color: #2d3033;
+            background-image: 
+                radial-gradient(rgba(255,255,255,0.15) 1px, transparent 0),
+                radial-gradient(rgba(255,255,255,0.15) 1px, transparent 0);
+            background-size: 8px 8px;
+            background-position: 0 0, 4px 4px;
+            color: #ffffff;
+            text-align: center;
+            padding: 30px 15px;
+            margin: 0;
+            text-shadow: 0 -1px 0 rgba(0,0,0,0.8);
+        }
+
+        /* 擬真玻璃卡片 */
+        .container {
+            background: linear-gradient(to bottom, #4c535c 0%, #3c424a 100%);
+            border: 1px solid #1a1c1e;
+            border-bottom: 1px solid #000000;
+            max-width: 440px;
+            margin: 0 auto;
+            padding: 25px 20px;
+            border-radius: 10px;
+            box-shadow: 
+                0 1px 0 rgba(255,255,255,0.2) inset,
+                0 10px 30px rgba(0,0,0,0.7);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .container::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 45%;
+            background: linear-gradient(to bottom, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0.01) 100%);
+            border-top-left-radius: 9px;
+            border-top-right-radius: 9px;
+            pointer-events: none;
+        }
+
+        h1 {
+            font-size: 20px;
+            font-weight: bold;
+            color: #ffffff;
+            margin: 0 0 15px 0;
+            text-shadow: 0 -1px 0 rgba(0,0,0,0.9);
+        }
+
+        .status {
+            display: inline-flex;
+            align-items: center;
+            background: linear-gradient(to bottom, #7a828a 0%, #545b63 100%);
+            border: 1px solid #31353a;
+            border-bottom: 1px solid #1e2023;
+            color: #e0e4eb;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: bold;
+            box-shadow: 
+                0 1px 0 rgba(255,255,255,0.1) inset,
+                0 1px 2px rgba(0,0,0,0.4);
+            text-shadow: 0 -1px 0 rgba(0,0,0,0.6);
+            margin: 10px 0;
+        }
+
+        .status::before {
+            content: "";
+            display: inline-block;
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            margin-right: 8px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.6) inset;
+        }
+
+        .status.waiting::before { background-color: #8e8e93; box-shadow: 0 0 4px #8e8e93; }
+        .status.checking::before { background-color: #ffcc00; box-shadow: 0 0 8px #ffcc00; }
+        .status.online::before { background-color: #39ff14; box-shadow: 0 0 8px #39ff14; }
+        .status.offline::before { background-color: #ff2d55; box-shadow: 0 0 8px #ff2d55; }
+
+        p {
+            font-size: 14px;
+            line-height: 1.5;
+            color: #d1d5db;
+            margin: 12px 0;
+            text-shadow: 0 -1px 0 rgba(0,0,0,0.5);
+        }
+
+        .info-group {
+            background-color: #2c2f34;
+            border: 1px solid #18191b;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 15px;
+            box-shadow: 0 1px 0 rgba(255,255,255,0.05);
+            text-align: left;
+        }
+
+        .info-group label {
+            font-size: 11px;
+            text-transform: uppercase;
+            color: #8a9199;
+            font-weight: bold;
+            display: block;
+            margin-bottom: 6px;
+            letter-spacing: 0.5px;
+        }
+
+        /* 經典 iOS 輸入框 */
+        .ios-input {
+            width: 100%;
+            box-sizing: border-box;
+            background-color: #ffffff;
+            border: 1px solid #6d7379;
+            border-radius: 6px;
+            padding: 10px;
+            font-size: 14px;
+            color: #333333;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2) inset;
+            outline: none;
+            margin-bottom: 12px;
+            font-family: monospace;
+        }
+
+        /* 藍色金屬高光網址框 */
+        .url-box {
+            background: linear-gradient(to bottom, #e2e7ed 0%, #c4cbd4 100%);
+            border: 1px solid #7c8288;
+            color: #202020;
+            padding: 12px;
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 13px;
+            word-break: break-all;
+            text-shadow: none;
+            box-shadow: 
+                0 1px 3px rgba(0,0,0,0.2) inset,
+                0 1px 0 rgba(255,255,255,0.4);
+            font-weight: bold;
+            text-align: center;
+        }
+
+        .error-msg {
+            color: #ff453a;
+            font-size: 12px;
+            margin-top: 8px;
+            display: none;
+            text-shadow: none;
+            background: rgba(255, 69, 58, 0.1);
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid rgba(255, 69, 58, 0.2);
+        }
+
+        .ios-btn {
+            display: inline-block;
+            background: linear-gradient(to bottom, #5ba4e6 0%, #2475c4 50%, #115096 51%, #1961b1 100%);
+            border: 1px solid #0e3768;
+            border-bottom-color: #051830;
+            color: white !important;
+            padding: 8px 20px;
+            font-size: 14px;
+            font-weight: bold;
+            border-radius: 5px;
+            text-decoration: none;
+            text-shadow: 0 -1px 0 rgba(0,0,0,0.6);
+            box-shadow: 
+                0 1px 0 rgba(255,255,255,0.4) inset,
+                0 1px 2px rgba(0,0,0,0.3);
+            cursor: pointer;
+            margin-top: 15px;
+        }
+        
+        .ios-btn:active {
+            background: linear-gradient(to bottom, #1961b1 0%, #115096 49%, #2475c4 50%, #5ba4e6 100%);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>CWA-on-iOS6WeatherAPP</h1>
+        
+        <div class="status waiting" id="statusIndicator">● 請輸入 API 金鑰</div>
+        <div class="error-msg" id="errorDetail"></div>
+        
+        <p id="statusText">請輸入你在氣象署申請的免費 API 授權碼，我們將即時為你生成 iOS 6 專用的天氣伺服器網址。</p>
+        
+        <div class="info-group">
+            <label>第一步：輸入中央氣象署 API 授權碼</label>
+            <input type="text" class="ios-input" id="apiKeyInput" placeholder="CWA-XXXXXX..." autocomplete="off">
+            
+            <label>第二步：複製產生的 iOS 6 專用網址</label>
+            <div class="url-box" id="myUrl">請先在上方輸入金鑰...</div>
+        </div>
+
+        <a href="https://github.com/你的用戶名/CWA-on-iOS6WeatherAPP" target="_blank" class="ios-btn">
+            檢視 GitHub 專案
+        </a>
+    </div>
+
+    <script>
+        const currentOrigin = window.location.origin;
+        const apiKeyInput = document.getElementById('apiKeyInput');
+        const urlBox = document.getElementById('myUrl');
+        const indicator = document.getElementById('statusIndicator');
+        const statusText = document.getElementById('statusText');
+        const errorDetail = document.getElementById('errorDetail');
+
+        let debounceTimer;
+
+        apiKeyInput.addEventListener('input', () => {
+            clearTimeout(debounceTimer);
+            const key = apiKeyInput.value.trim();
+
+            if (!key) {
+                urlBox.innerText = "請先在上方輸入金鑰...";
+                indicator.className = "status waiting";
+                indicator.innerText = "● 請輸入 API 金鑰";
+                statusText.innerText = "請輸入你在氣象署申請的免費 API 授權碼，我們將即時為你生成 iOS 6 專用的天氣伺服器網址。";
+                errorDetail.style.display = "none";
+                return;
+            }
+
+            // 動態生成帶有 ?k= 參數的 YQL 網址
+            const generatedUrl = `${currentOrigin}/yql?k=${key}`;
+            urlBox.innerText = generatedUrl;
+
+            // 顯示檢測中（黃燈）
+            indicator.className = "status checking";
+            indicator.innerText = "● 正在驗證金鑰...";
+            statusText.innerText = "正在向中央氣象署發送測試請求以確認金鑰有效性...";
+            errorDetail.style.display = "none";
+
+            // 延遲 800ms 再發送驗證，避免使用者打字時拼命送出請求
+            debounceTimer = setTimeout(() => {
+                const testUrl = `${generatedUrl}&q=lat=25.03 and lon=121.56`;
+                
+                fetch(testUrl)
+                    .then(response => {
+                        if (!response.ok) throw new Error(`HTTP 錯誤！狀態碼: ${response.status}`);
+                        return response.json();
+                    })
+                    .then(data => {
+                        if (data && data.current && data.current.temp !== undefined) {
+                            indicator.className = "status online";
+                            indicator.innerText = "● 驗證成功！服務正常";
+                            statusText.innerHTML = `金鑰有效！台北即時測試溫度：<strong>${data.current.temp}°C</strong>。<br>現在你可以將上方網址複製並寫入 WeatherX 插件了！`;
+                        } else {
+                            throw new Error("回傳格式解析失敗。");
+                        }
+                    })
+                    .catch(error => {
+                        indicator.className = "status offline";
+                        indicator.innerText = "● 金鑰無效或異常";
+                        statusText.innerText = "無法透過此金鑰取得氣象資料，請檢查是否有複製完整或輸入錯誤。";
+                        errorDetail.style.display = "block";
+                        errorDetail.innerText = `錯誤原因: ${error.message}`;
+                    });
+            }, 800);
+        });
+    </script>
+</body>
+</html>
